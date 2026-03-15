@@ -276,7 +276,8 @@ MIT — free to use and modify.
 
 ## 👩‍💻 Built By
 
-**Samanvitha** — CredFieldAI  
+**Samanvitha** — ClickFieldAi
+
 Built with ❤️ using n8n, Google Gemini, HubSpot, and Supabase.
 
 ---
