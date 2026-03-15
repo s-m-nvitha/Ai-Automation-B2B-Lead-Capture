@@ -176,7 +176,7 @@ https://YOUR-N8N-INSTANCE/webhook/lead-capture
 4. Body (JSON):
 ```json
 {
-  "name": "Likith Yadav",
+  "name": "Minato",
   "email": "binner2392@gmail.com",
   "phone": "+91 9876543210",
   "company": "TechStartup.io",
@@ -276,7 +276,7 @@ MIT — free to use and modify.
 
 ## 👩‍💻 Built By
 
-**Samanvitha** — LeadFlow AI  
+**Samanvitha** — CredFieldAI  
 Built with ❤️ using n8n, Google Gemini, HubSpot, and Supabase.
 
 ---
