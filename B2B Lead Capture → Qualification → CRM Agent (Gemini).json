@@ -1,0 +1,472 @@
+{
+  "name": "B2B Lead Capture → Qualification → CRM Agent (Gemini)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-capture",
+        "options": {}
+      },
+      "id": "bc6972b4-6dcd-4a1a-9de9-7adadd9d7ab5",
+      "name": "Webhook: Capture Lead",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        -880,
+        64
+      ],
+      "webhookId": "99025bb3-9616-4bc5-a181-e65c1a0649b5"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"status\": \"received\", \"message\": \"Lead is being processed.\"}",
+        "options": {}
+      },
+      "id": "16107055-7be1-47ae-b6e7-8e903092a243",
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        -656,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || $input.first().json;\n\nconst lead = {\n  name:        (body.name      || '').trim(),\n  email:       (body.email     || '').trim().toLowerCase(),\n  phone:       (body.phone     || '').trim(),\n  company:     (body.company   || '').trim(),\n  role:        (body.role      || '').trim(),\n  website:     (body.website   || '').trim(),\n  employees:   (body.employees || '').trim(),\n  budget:      (body.budget    || '').trim(),\n  message:     (body.message   || '').trim(),\n  source:      body.source     || 'webhook',\n  captured_at: new Date().toISOString()\n};\n\nif (!lead.email || !lead.name) {\n  throw new Error('Missing required fields: name and email are mandatory.');\n}\n\nreturn [{ json: lead }];"
+      },
+      "id": "e54e60fc-917f-428b-859b-409b3bb53550",
+      "name": "Normalize Lead Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -656,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const lead = $('Normalize Lead Data').first().json;\nconst response = $input.first().json;\n\nlet rawText = '';\ntry {\n  rawText = response.candidates[0].content.parts[0].text || '{}';\n  rawText = rawText.replace(/```json|```/g, '').trim();\n  const jsonMatch = rawText.match(/\\{[\\s\\S]*\\}/);\n  if (jsonMatch) rawText = jsonMatch[0];\n} catch(e) {\n  rawText = '{}';\n}\n\nlet qualification;\ntry {\n  qualification = JSON.parse(rawText);\n} catch(e) {\n  qualification = {\n    score: 7,\n    tier: 'Warm',\n    reasoning: 'Fallback qualification',\n    recommended_action: 'Send nurture email',\n    icp_match: true\n  };\n}\n\nconst usage = response.usageMetadata || {};\nconst tokenLog = {\n  prompt_tokens: usage.promptTokenCount || 0,\n  completion_tokens: usage.candidatesTokenCount || 0,\n  total_tokens: usage.totalTokenCount || 0,\n  estimated_cost_usd: '0.000000'\n};\n\nreturn [{ json: { \n  ...lead, \n  qualification, \n  token_usage: tokenLog, \n  qualified_at: new Date().toISOString() \n}}];"
+      },
+      "id": "97cc4418-689f-4ef2-8d99-c8d5b8d78c9f",
+      "name": "Parse & Merge Qualification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -128,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "condition_1",
+              "leftValue": "={{ $json.qualification.tier }}",
+              "rightValue": "Cold",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c0743b61-ca3d-4acc-a03c-a24adf448f73",
+      "name": "Filter: Skip Cold Leads",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [
+        80,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "key",
+              "value": "AIzaSyA3iA0qP1lTn6br8G7bj-d-VeE-RYluGTE"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [\n    {\n      \"parts\": [\n        {\n          \"text\": \"Write a professional B2B follow-up email body (90-120 words).\\n\\nRules:\\n- Do NOT include greeting\\n- Do NOT include subject\\n- Do NOT include signature\\n- Only the email body\\n\\nLead info:\\nName: {{$json.name}}\\nCompany: {{$json.company}}\\nRole: {{$json.role}}\\nContext message: {{$json.message}}\\n\\nGoal: encourage a quick 10 minute call and ask the recipient what time works best.\"\n        }\n      ]\n    }\n  ],\n  \"generationConfig\": {\n    \"temperature\": 0.7,\n    \"maxOutputTokens\": 1024\n  }\n}",
+        "options": {}
+      },
+      "id": "d9a868a3-fdb8-4ba9-89c7-d7ca81201b1f",
+      "name": "Gemini: Draft Follow-up Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        304,
+        -32
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const lead = $('Parse & Merge Qualification').first().json;\nconst response = $input.first().json;\n\nlet emailBody = '';\n\ntry {\n  emailBody = response.candidates[0].content.parts[0].text.trim();\n\n  // Clean excessive new lines\n  emailBody = emailBody.replace(/\\n{3,}/g, '\\n\\n');\n\n} catch(e) {\n  emailBody = 'Something went wrong generating the email.';\n}\n\nconst usage = response.usageMetadata || {};\nconst prev = lead.token_usage || {};\n\nconst combined = {\n  prompt_tokens: (prev.prompt_tokens || 0) + (usage.promptTokenCount || 0),\n  completion_tokens: (prev.completion_tokens || 0) + (usage.candidatesTokenCount || 0),\n  total_tokens: (prev.total_tokens || 0) + (usage.totalTokenCount || 0),\n  estimated_cost_usd: '0.000000'\n};\n\nconst fullEmail =\n`\n${emailBody}\n`;\n\nreturn [{ json: { ...lead, email_body: fullEmail, token_usage: combined } }];"
+      },
+      "id": "50941b35-db78-46a3-b637-cf120b90829a",
+      "name": "Merge Email Draft",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        -48
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const lead = $('Merge Email Draft').first().json;\n\nconsole.log('=== LEAD PROCESSED ===');\nconsole.log(`Name:    ${lead.name}`);\nconsole.log(`Email:   ${lead.email}`);\nconsole.log(`Company: ${lead.company}`);\nconsole.log(`Tier:    ${lead.qualification.tier} (Score: ${lead.qualification.score}/10)`);\nconsole.log(`Action:  ${lead.qualification.recommended_action}`);\nconsole.log(`Tokens:  ${lead.token_usage.total_tokens} (~$${lead.token_usage.estimated_cost_usd})`);\nconsole.log('======================');\n\nreturn [{\n  json: {\n    status:             'success',\n    lead_email:         lead.email,\n    tier:               lead.qualification.tier,\n    score:              lead.qualification.score,\n    action_taken:       lead.qualification.recommended_action,\n    email_sent_to:      lead.email,\n    crm_updated:        true,\n    supabase_updated:   true,\n    total_tokens_used:  lead.token_usage.total_tokens,\n    estimated_cost_usd: lead.token_usage.estimated_cost_usd,\n    processed_at:       new Date().toISOString()\n  }\n}];"
+      },
+      "id": "73e4aebc-aa4c-4b35-948b-d177571f449a",
+      "name": "Log & Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1728,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email }}",
+        "subject": "=Following Up -- {{ $json.company }}",
+        "message": "=<div style=\"font-family: Arial, sans-serif; font-size: 15px; color: #222; line-height: 1.6; max-width: 600px;\">\n  <p>Hi {{ $json.name }},</p>\n  <p>{{ $json.email_body }}</p>\n  <br/>\n  <p style=\"color: #444;\">Best regards,</p>\n  <p><strong>Samanvitha</strong><br/>\n  Sales Development Representative<br/>\n  <span style=\"color: #888;\">samanvithar2005@gmail.com</span><br>\n<strong>ClickFieldAi</p>\n\n  <hr style=\"border: none; border-top: 1px solid #eee; margin-top: 20px;\"/>\n</div>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1072,
+        -128
+      ],
+      "id": "55b1ff80-1d63-41a5-9a3a-e0ff30dff539",
+      "name": "Send a message",
+      "webhookId": "3075bb1f-78f9-496c-a4e5-9562d6665a18",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "IDXdHBm3FTURdRB9",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "tableId": "leads",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "email",
+              "fieldValue": "={{ $('Merge Email Draft').first().json.email }}"
+            },
+            {
+              "fieldId": "name",
+              "fieldValue": "={{ $('Merge Email Draft').first().json.name }}"
+            },
+            {
+              "fieldId": "company",
+              "fieldValue": "={{ $('Merge Email Draft').first().json.company }}"
+            },
+            {
+              "fieldId": "role",
+              "fieldValue": "={{ $('Merge Email Draft').first().json.role}}"
+            },
+            {
+              "fieldId": "message",
+              "fieldValue": "={{ $('Merge Email Draft').first().json.message }}"
+            },
+            {
+              "fieldId": "source",
+              "fieldValue": "={{ $('Merge Email Draft').first().json.source }}"
+            },
+            {
+              "fieldId": "score",
+              "fieldValue": "={{ $('Merge Email Draft').first().json.qualification.score }}"
+            },
+            {
+              "fieldId": "tier",
+              "fieldValue": "={{ $('Merge Email Draft').first().json.qualification.tier }}"
+            },
+            {
+              "fieldId": "icp_match",
+              "fieldValue": "={{ $('Merge Email Draft').first().json.qualification.icp_match }}"
+            },
+            {
+              "fieldId": "reasoning",
+              "fieldValue": "={{ $('Merge Email Draft').first().json.qualification.reasoning }}"
+            },
+            {
+              "fieldId": "recommended_action",
+              "fieldValue": "={{ $('Merge Email Draft').first().json.qualification.recommended_action }}"
+            },
+            {
+              "fieldId": "email_sent",
+              "fieldValue": "True"
+            },
+            {
+              "fieldId": "prompt_tokens",
+              "fieldValue": "={{ $('Merge Email Draft').first().json.token_usage.prompt_tokens }}"
+            },
+            {
+              "fieldId": "completion_tokens",
+              "fieldValue": "={{ $('Merge Email Draft').first().json.token_usage.completion_tokens }}"
+            },
+            {
+              "fieldId": "total_tokens",
+              "fieldValue": "={{ $('Merge Email Draft').first().json.token_usage.total_tokens }}"
+            },
+            {
+              "fieldId": "estimated_cost_usd",
+              "fieldValue": "={{ $('Merge Email Draft').first().json.token_usage.estimated_cost_usd }}"
+            },
+            {
+              "fieldId": "captured_at",
+              "fieldValue": "={{ $('Merge Email Draft').first().json.captured_at }}"
+            },
+            {
+              "fieldId": "qualified_at",
+              "fieldValue": "={{ $('Merge Email Draft').first().json.qualified_at }}"
+            },
+            {
+              "fieldId": "phone",
+              "fieldValue": "={{ $('Merge Email Draft').first().json.phone }}"
+            },
+            {
+              "fieldId": "website",
+              "fieldValue": "={{ $('Merge Email Draft').first().json.website}}"
+            },
+            {
+              "fieldId": "employees",
+              "fieldValue": "={{ $('Merge Email Draft').first().json.employees }}"
+            },
+            {
+              "fieldId": "budget",
+              "fieldValue": "={{ $('Merge Email Draft').first().json.budget }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1280,
+        -128
+      ],
+      "id": "8143e2e8-7b5b-48d4-a204-00f05b1227e1",
+      "name": "Create a row",
+      "credentials": {
+        "supabaseApi": {
+          "id": "f1Xm3tWBBWh6Ctkg",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "key",
+              "value": "AIzaSyA3iA0qP1lTn6br8G7bj-d-VeE-RYluGTE"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"contents\": [\n    {\n      \"parts\": [\n        {\n          \"text\": \"You are a B2B sales expert. Return ONLY valid JSON no markdown. Schema: {score:7,tier:Warm,reasoning:one sentence,recommended_action:Send nurture email,icp_match:true} Lead: Name: test\"\n        }\n      ]\n    }\n  ],\n  \"generationConfig\": {\n    \"temperature\": 0.2,\n    \"maxOutputTokens\": 500\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -400,
+        64
+      ],
+      "id": "aa4e2adf-e1fa-4112-b7ab-067355ea0d64",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.hubapi.com/crm/v3/objects/contacts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer pat-na2-3afe7552-add3-4385-8914-59df8966e94d"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  properties: {\n    email: $json.email,\n    firstname: $json.name,\n    phone: $json.phone,\n    company: $json.company,\n    jobtitle: $json.role,\n    website: $json.website,\n\n    lifecyclestage: \"lead\",\n\n    numemployees:\n$json.employees === \"1-5\" ? \"1-5\" :\n$json.employees === \"5-25\" ? \"5-25\" :\n$json.employees === \"25-50\" ? \"25-50\" :\n$json.employees === \"50-200\" ? \"100-500\" :\n$json.employees === \"200-500\" ? \"100-500\" :\n\"100-500\",\n\n    message: $json.message,\n    lead_source: $json.source\n  }\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1152,
+        208
+      ],
+      "id": "852a6a79-ac7e-4ade-94f8-60424999ec4f",
+      "name": "HTTP Request2"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook: Capture Lead": {
+      "main": [
+        [
+          {
+            "node": "Normalize Lead Data",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Webhook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Lead Data": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse & Merge Qualification": {
+      "main": [
+        [
+          {
+            "node": "Filter: Skip Cold Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter: Skip Cold Leads": {
+      "main": [
+        [
+          {
+            "node": "Gemini: Draft Follow-up Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini: Draft Follow-up Email": {
+      "main": [
+        [
+          {
+            "node": "Merge Email Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Email Draft": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP Request2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message": {
+      "main": [
+        [
+          {
+            "node": "Create a row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create a row": {
+      "main": [
+        [
+          {
+            "node": "Log & Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Parse & Merge Qualification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request2": {
+      "main": [
+        [
+          {
+            "node": "Log & Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "8ab4d61e-5014-4819-9b3e-c468b45e6aae",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "796b257e401e48bee39c6b1f3f4d05574d8c53bc6565ced94993d833b46f161b"
+  },
+  "id": "GAlV6W3IyhPULVDI",
+  "tags": []
+}
